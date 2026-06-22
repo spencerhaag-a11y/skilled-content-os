@@ -1,13 +1,5 @@
-// Edge Function: kb-extract-text
-// Module 2 — "On upload, text-extractable files (PDF, DOCX, TXT) are parsed
-// and stored as searchable text in the database."
-// Runs with the CALLER's JWT, so RLS guarantees a user can only trigger
-// extraction on files inside their own account.
-//
-// Deploy: supabase functions deploy kb-extract-text
-
+// Edge Function: kb-extract-text (fixed)
 import { createClient } from "npm:@supabase/supabase-js@2";
-import mammoth from "npm:mammoth@1.8.0";
 import { extractText, getDocumentProxy } from "npm:unpdf@0.12.1";
 import { corsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
 
@@ -20,22 +12,37 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+async function extractDocx(buffer: ArrayBuffer): Promise<string> {
+  const { unzipSync } = await import("https://esm.sh/fflate@0.8.2");
+  const uint8 = new Uint8Array(buffer);
+  let files: Record<string, Uint8Array>;
+  try {
+    files = unzipSync(uint8);
+  } catch {
+    throw new Error("Could not unzip DOCX file.");
+  }
+  const docXml = files["word/document.xml"];
+  if (!docXml) throw new Error("word/document.xml not found.");
+  const xmlString = new TextDecoder().decode(docXml);
+  return xmlString
+    .replace(/<w:p[ >]/g, "\n<w:p ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/&#x2019;/g, "'").replace(/&#x201C;/g, '"').replace(/&#x201D;/g, '"')
+    .replace(/\s+/g, " ").trim();
+}
+
 async function extract(fileName: string, blob: Blob): Promise<string> {
   const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
-  if (ext === "txt") {
-    return await blob.text();
-  }
+  if (ext === "txt") return await blob.text();
   if (ext === "pdf") {
     const buffer = new Uint8Array(await blob.arrayBuffer());
     const pdf = await getDocumentProxy(buffer);
     const { text } = await extractText(pdf, { mergePages: true });
     return typeof text === "string" ? text : (text as string[]).join("\n");
   }
-  if (ext === "docx") {
-    const arrayBuffer = await blob.arrayBuffer();
-    const result = await mammoth.extractRawText({ arrayBuffer });
-    return result.value;
-  }
+  if (ext === "docx") return await extractDocx(await blob.arrayBuffer());
   throw new Error(`Unsupported extraction type: .${ext}`);
 }
 
@@ -53,7 +60,6 @@ Deno.serve(async (req) => {
   }
   if (!fileId) return json({ error: "file_id is required." }, 400);
 
-  // Caller-scoped client: every query below is subject to the caller's RLS.
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_ANON_KEY")!,
@@ -67,15 +73,13 @@ Deno.serve(async (req) => {
     .maybeSingle();
 
   if (fileError) return json({ error: fileError.message }, 500);
-  if (!file) return json({ error: "File not found or not accessible." }, 404);
+  if (!file) return json({ error: "File not found." }, 404);
 
   try {
     const { data: blob, error: downloadError } = await supabase.storage
       .from("knowledge-base")
       .download(file.file_url);
-    if (downloadError || !blob) {
-      throw new Error(downloadError?.message ?? "Download failed.");
-    }
+    if (downloadError || !blob) throw new Error(downloadError?.message ?? "Download failed.");
 
     const raw = await extract(file.file_name, blob);
     const text = raw.replace(/\s+/g, " ").trim().slice(0, MAX_EXTRACTED_CHARS);
@@ -92,7 +96,6 @@ Deno.serve(async (req) => {
       .from("knowledge_base_files")
       .update({ extraction_status: "failed" })
       .eq("id", fileId);
-    const message = err instanceof Error ? err.message : "Extraction failed.";
-    return json({ file_id: fileId, status: "failed", error: message }, 422);
+    return json({ file_id: fileId, status: "failed", error: err instanceof Error ? err.message : "Extraction failed." }, 422);
   }
 });
