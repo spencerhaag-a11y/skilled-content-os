@@ -1,0 +1,10 @@
+# Per-function configuration.
+# testimonial-form is public (unauthenticated): clients submit feedback via
+# opaque share-link tokens.
+[functions.testimonial-form]
+verify_jwt = false
+
+# video-webhook is called by AssemblyAI (no Supabase JWT). It authenticates
+# with the per-job webhook_token in the URL and writes with the service role.
+[functions.video-webhook]
+verify_jwt = false

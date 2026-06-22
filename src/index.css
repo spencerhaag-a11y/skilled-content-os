@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* White-label theming: --primary is overwritten at runtime from the
+       account record (accounts.primary_color) by applyAccountTheme(). */
+    --background: 0 0% 100%;
+    --foreground: 224 14% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 224 14% 10%;
+    --primary: 152 64% 32%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 13% 95%;
+    --secondary-foreground: 224 14% 14%;
+    --muted: 220 13% 95%;
+    --muted-foreground: 220 9% 42%;
+    --accent: 152 50% 94%;
+    --accent-foreground: 152 64% 18%;
+    --destructive: 0 72% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 13% 89%;
+    --input: 220 13% 85%;
+    --ring: 152 64% 32%;
+    --radius: 0.5rem;
+
+    /* App chrome — stays dark regardless of client theme */
+    --sidebar: 225 15% 9%;
+    --sidebar-foreground: 220 14% 88%;
+    --sidebar-muted: 222 10% 55%;
+    --sidebar-active: 225 14% 16%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+}
