@@ -19,6 +19,10 @@ export interface KbFile {
   file_type: string;
   file_size: number;
   extraction_status: "pending" | "done" | "failed" | "not_applicable";
+  /** Named logo-kit slot this file fills (e.g. "primary-light"), else null. */
+  slot_key: string | null;
+  /** Brand-assets sub-category this file belongs to, else null. */
+  category_key: string | null;
   created_at: string;
 }
 
@@ -50,6 +54,12 @@ interface KnowledgeBaseState {
     userId: string;
     section: KbSection;
     file: File;
+    /** Restrict accepted types for this upload (logo slots / brand-asset categories). */
+    acceptedTypes?: string[];
+    /** Tag the file as filling a named logo slot. */
+    slotKey?: string;
+    /** Tag the file with a brand-assets sub-category. */
+    categoryKey?: string;
   }) => Promise<string | null>; // returns error message or null on success
   remove: (file: KbFile) => Promise<string | null>;
   signedUrl: (file: KbFile) => Promise<string | null>;
@@ -103,7 +113,9 @@ export const useKnowledgeBaseStore = create<KnowledgeBaseState>((set, get) => ({
         .order("sort_order"),
       supabase
         .from("knowledge_base_files")
-        .select("id, section_id, file_url, file_name, file_type, file_size, extraction_status, created_at")
+        .select(
+          "id, section_id, file_url, file_name, file_type, file_size, extraction_status, slot_key, category_key, created_at"
+        )
         .eq("account_id", accountId)
         .order("created_at", { ascending: false }),
     ]);
@@ -118,8 +130,8 @@ export const useKnowledgeBaseStore = create<KnowledgeBaseState>((set, get) => ({
     set({ sections: sectionsRes.data ?? [], filesBySection, status: "ready" });
   },
 
-  upload: async ({ accountId, userId, section, file }) => {
-    const validationError = validateFile(file, section.accepted_types);
+  upload: async ({ accountId, userId, section, file, acceptedTypes, slotKey, categoryKey }) => {
+    const validationError = validateFile(file, acceptedTypes ?? section.accepted_types);
     if (validationError) return validationError;
 
     const safeName = sanitizeFileName(file.name);
@@ -146,9 +158,13 @@ export const useKnowledgeBaseStore = create<KnowledgeBaseState>((set, get) => ({
           file_type: ext,
           file_size: file.size,
           extraction_status: extractable ? "pending" : "not_applicable",
+          slot_key: slotKey ?? null,
+          category_key: categoryKey ?? null,
           created_by: userId,
         })
-        .select("id, section_id, file_url, file_name, file_type, file_size, extraction_status, created_at")
+        .select(
+          "id, section_id, file_url, file_name, file_type, file_size, extraction_status, slot_key, category_key, created_at"
+        )
         .single();
       if (insertError) {
         await supabase.storage.from("knowledge-base").remove([path]);

@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Palette, Globe, Loader2, Check } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { useAccountStore } from "@/stores/accountStore";
@@ -19,6 +19,20 @@ import { TagInput } from "@/components/TagInput";
 
 const PLATFORM_OPTIONS = ["Instagram", "TikTok", "LinkedIn", "Facebook", "X"];
 
+const HEX_RE = /^#[0-9a-f]{6}$/i;
+
+/** Coerce free-typed text into a "#" + up-to-6 hex-digit string (accepts paste
+ *  with or without a leading "#", strips invalid chars, lowercases). */
+function normalizeHexInput(value: string): string {
+  const digits = value.replace(/[^0-9a-fA-F]/g, "").toLowerCase().slice(0, 6);
+  return `#${digits}`;
+}
+
+/** A safe value for a <input type="color">, which requires a full 6-digit hex. */
+function swatchValue(hex: string): string {
+  return HEX_RE.test(hex) ? hex : "#000000";
+}
+
 interface ScanSuggestions {
   business_name?: string;
   tagline?: string;
@@ -34,9 +48,12 @@ export default function BrandKit() {
   const { kit: storedKit, status, error, load, save } = useBrandKitStore();
 
   const [form, setForm] = useState<BrandKitDraft>(EMPTY_BRAND_KIT);
-  const [saved, setSaved] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const dirtyRef = useRef(false);
   const [scanState, setScanState] = useState<"idle" | "scanning" | "applied" | "error">("idle");
   const [scanError, setScanError] = useState<string | null>(null);
+  const [newHex, setNewHex] = useState("#");
+  const [colorError, setColorError] = useState<string | null>(null);
 
   useEffect(() => {
     if (account) void load(account.id);
@@ -50,17 +67,17 @@ export default function BrandKit() {
   const liveScore = calculateBrandScore(form);
 
   function update<K extends keyof BrandKitDraft>(key: K, value: BrandKitDraft[K]) {
-    setSaved(false);
+    markDirty();
     setForm((f) => ({ ...f, [key]: value }));
   }
 
   function updateIcp(key: keyof BrandKitDraft["icp"], value: string) {
-    setSaved(false);
+    markDirty();
     setForm((f) => ({ ...f, icp: { ...f.icp, [key]: value } }));
   }
 
   function togglePlatform(platform: string) {
-    setSaved(false);
+    markDirty();
     setForm((f) => {
       const exists = f.platforms.some((p) => p.platform === platform);
       const platforms: PlatformEntry[] = exists
@@ -71,7 +88,7 @@ export default function BrandKit() {
   }
 
   function updateHandle(platform: string, handle: string) {
-    setSaved(false);
+    markDirty();
     setForm((f) => ({
       ...f,
       platforms: f.platforms.map((p) => (p.platform === platform ? { ...p, handle } : p)),
@@ -79,12 +96,48 @@ export default function BrandKit() {
   }
 
   function updateColor(index: number, hex: string) {
-    setSaved(false);
+    markDirty();
     setForm((f) => {
       const brand_colors = [...f.brand_colors];
       brand_colors[index] = hex;
       return { ...f, brand_colors };
     });
+  }
+
+  function addColor() {
+    if (form.brand_colors.length >= 6) return;
+    if (!HEX_RE.test(newHex)) {
+      setColorError("Enter a full 6-digit hex like #5b0e14.");
+      return;
+    }
+    if (form.brand_colors.some((c) => c.toLowerCase() === newHex.toLowerCase())) {
+      setColorError("That color is already in your palette.");
+      return;
+    }
+    setColorError(null);
+    update("brand_colors", [...form.brand_colors, newHex.toLowerCase()]);
+    setNewHex("#");
+  }
+
+  function markDirty() {
+    dirtyRef.current = true;
+    setSaveStatus((s) => (s === "saving" ? s : "idle"));
+  }
+
+  /** Persist the kit to Supabase. Auto-save (force=false, fired on field blur)
+   *  only writes when something actually changed and every color is a valid
+   *  hex; the Save button forces a write. */
+  async function commit(force = false) {
+    if (!account || !user) return;
+    if (!force && !dirtyRef.current) return;
+    if (form.brand_colors.some((c) => !HEX_RE.test(c))) {
+      if (force) setColorError("Fix the highlighted hex color before saving.");
+      return;
+    }
+    dirtyRef.current = false;
+    setSaveStatus("saving");
+    const ok = await save(account.id, user.id, form);
+    setSaveStatus(ok ? "saved" : "error");
   }
 
   async function handleScan() {
@@ -115,7 +168,7 @@ export default function BrandKit() {
           objections: f.icp.objections || suggestions.icp?.objections || "",
         },
       }));
-      setSaved(false);
+      markDirty();
       setScanState("applied");
     } catch (err) {
       setScanError(err instanceof Error ? err.message : "Scan failed.");
@@ -125,11 +178,7 @@ export default function BrandKit() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!account || !user) return;
-    const invalidColor = form.brand_colors.find((c) => !/^#[0-9a-f]{6}$/i.test(c));
-    if (invalidColor) return; // color pickers always emit valid hex; guard anyway
-    const ok = await save(account.id, user.id, form);
-    if (ok) setSaved(true);
+    await commit(true);
   }
 
   if (status === "loading" || status === "idle") {
@@ -167,7 +216,7 @@ export default function BrandKit() {
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit} onBlur={() => void commit()} className="space-y-6">
         {/* ── Identity ── */}
         <Card>
           <CardHeader>
@@ -388,42 +437,78 @@ export default function BrandKit() {
           <CardContent className="space-y-4">
             <div className="space-y-1.5">
               <Label>Brand colors</Label>
-              <div className="flex flex-wrap items-center gap-2">
-                {form.brand_colors.map((hex, i) => (
-                  <div key={i} className="flex items-center gap-1.5 rounded-md border p-1.5">
-                    <input
-                      type="color"
-                      value={/^#[0-9a-f]{6}$/i.test(hex) ? hex : "#000000"}
-                      onChange={(e) => updateColor(i, e.target.value)}
-                      className="h-7 w-9 cursor-pointer rounded border-0 bg-transparent p-0"
-                      aria-label={`Brand color ${i + 1}`}
-                    />
-                    <span className="text-xs font-medium uppercase tabular-nums">{hex}</span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        update(
-                          "brand_colors",
-                          form.brand_colors.filter((_, idx) => idx !== i)
-                        )
-                      }
-                      className="rounded px-1 text-muted-foreground hover:text-foreground"
-                      aria-label="Remove color"
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {form.brand_colors.map((hex, i) => (
+                    <div key={i} className="flex items-center gap-1.5 rounded-md border p-1.5">
+                      <input
+                        type="color"
+                        value={swatchValue(hex)}
+                        onChange={(e) => updateColor(i, e.target.value)}
+                        className="h-7 w-9 cursor-pointer rounded border-0 bg-transparent p-0"
+                        aria-label={`Brand color ${i + 1} swatch`}
+                      />
+                      <Input
+                        value={hex}
+                        onChange={(e) => updateColor(i, normalizeHexInput(e.target.value))}
+                        spellCheck={false}
+                        className="h-7 w-[5.5rem] font-mono text-xs uppercase"
+                        aria-label={`Brand color ${i + 1} hex`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          update(
+                            "brand_colors",
+                            form.brand_colors.filter((_, idx) => idx !== i)
+                          )
+                        }
+                        className="rounded px-1 text-muted-foreground hover:text-foreground"
+                        aria-label="Remove color"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
                 {form.brand_colors.length < 6 && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => update("brand_colors", [...form.brand_colors, "#1a8a4f"])}
-                  >
-                    Add color
-                  </Button>
+                  <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 rounded-md border p-1.5">
+                      <input
+                        type="color"
+                        value={swatchValue(newHex)}
+                        onChange={(e) => {
+                          setNewHex(e.target.value);
+                          setColorError(null);
+                        }}
+                        className="h-7 w-9 cursor-pointer rounded border-0 bg-transparent p-0"
+                        aria-label="New color swatch"
+                      />
+                      <Input
+                        value={newHex}
+                        onChange={(e) => {
+                          setNewHex(normalizeHexInput(e.target.value));
+                          setColorError(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            addColor();
+                          }
+                        }}
+                        placeholder="#5b0e14"
+                        spellCheck={false}
+                        className="h-7 w-[5.5rem] font-mono text-xs uppercase"
+                        aria-label="New brand color hex"
+                      />
+                    </div>
+                    <Button type="button" variant="outline" size="sm" onClick={addColor}>
+                      Add color
+                    </Button>
+                  </div>
                 )}
+                {colorError && <p className="text-sm text-destructive">{colorError}</p>}
               </div>
             </div>
             <div className="space-y-1.5">
@@ -473,16 +558,28 @@ export default function BrandKit() {
 
         <div className="sticky bottom-0 -mx-4 border-t bg-background/95 px-4 py-3 backdrop-blur lg:-mx-8 lg:px-8">
           <div className="mx-auto flex max-w-3xl items-center justify-between">
-            <p className="text-sm text-muted-foreground">
-              {saved ? "Saved." : "Unsaved changes apply to all future AI content."}
+            <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              {saveStatus === "saving" ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…
+                </>
+              ) : saveStatus === "saved" ? (
+                <>
+                  <Check className="h-3.5 w-3.5 text-primary" /> Saved
+                </>
+              ) : saveStatus === "error" ? (
+                <span className="text-destructive">Couldn't save — try the Save button.</span>
+              ) : (
+                "Changes save automatically when you click out of a field."
+              )}
             </p>
-            <Button type="submit" disabled={status === "saving"}>
-              {status === "saving" ? (
+            <Button type="submit" disabled={saveStatus === "saving"}>
+              {saveStatus === "saving" ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
-              ) : saved ? (
+              ) : saveStatus === "saved" ? (
                 <Check className="h-4 w-4" />
               ) : null}
-              {status === "saving" ? "Saving…" : saved ? "Saved" : "Save brand kit"}
+              {saveStatus === "saving" ? "Saving…" : "Save brand kit"}
             </Button>
           </div>
         </div>
