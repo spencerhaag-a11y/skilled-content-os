@@ -4,6 +4,7 @@ import {
   Palette,
   BookOpen,
   Recycle,
+  Layers,
   Share2,
   FileText,
   Mail,
@@ -48,6 +49,7 @@ export const MODULES: ModuleDef[] = [
   { path: "/analytics", name: "Analytics", description: "Content volume, pipeline status, module usage, and GHL push history.", icon: BarChart3, phase: 22, group: "Overview" },
 
   { path: "/repurpose", name: "Repurposing Engine", description: "One input in — a full multi-platform content suite out.", icon: Recycle, phase: 5, group: "Create" },
+  { path: "/bulk-generate", name: "Bulk Generate", description: "Paste a list of topics and generate every post in one run.", icon: Layers, phase: 5, group: "Create" },
   { path: "/social-posts", name: "Social Posts", description: "Platform-specific posts built from your brand kit and knowledge base.", icon: Share2, phase: 6, group: "Create" },
   { path: "/blog-posts", name: "Blog Posts", description: "Long-form SEO content aligned to your pillars and voice.", icon: FileText, phase: 7, group: "Create" },
   { path: "/email", name: "Email Marketing", description: "Newsletters, promos, and drip sequences — pushed straight to GHL.", icon: Mail, phase: 8, group: "Create" },

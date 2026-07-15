@@ -14,6 +14,7 @@ const OwnerPanel = lazy(() => import("@/pages/owner/OwnerPanel"));
 const Dashboard = lazy(() => import("@/pages/modules/Dashboard"));
 const Analytics = lazy(() => import("@/pages/modules/Analytics"));
 const RepurposingEngine = lazy(() => import("@/pages/modules/RepurposingEngine"));
+const BulkGenerate = lazy(() => import("@/pages/modules/BulkGenerate"));
 const SocialPosts = lazy(() => import("@/pages/modules/SocialPosts"));
 const BlogPosts = lazy(() => import("@/pages/modules/BlogPosts"));
 const EmailMarketing = lazy(() => import("@/pages/modules/EmailMarketing"));
@@ -128,6 +129,7 @@ export default function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/repurpose" element={<RepurposingEngine />} />
+          <Route path="/bulk-generate" element={<BulkGenerate />} />
           <Route path="/social-posts" element={<SocialPosts />} />
           <Route path="/blog-posts" element={<BlogPosts />} />
           <Route path="/email" element={<EmailMarketing />} />
