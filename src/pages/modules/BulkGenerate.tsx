@@ -23,6 +23,9 @@ import { cn } from "@/lib/utils";
 
 const PLATFORMS = ["Instagram", "TikTok", "LinkedIn", "Facebook", "X"];
 
+/** SFT's five content pillars — used when the Brand Kit has none defined yet. */
+const SFT_DEFAULT_PILLARS = ["Authority", "Belief", "Growth", "Social Proof", "Authenticity"];
+
 /** UI label ⇢ generate-social `format` value. Spec formats: single image,
  *  carousel, reel script. */
 const FORMATS: { value: string; label: string }[] = [
@@ -85,6 +88,9 @@ export default function BulkGenerate() {
   const pillars = useBrandKitStore((s) => s.kit.pillars);
   const brandStatus = useBrandKitStore((s) => s.status);
   const loadBrandKit = useBrandKitStore((s) => s.load);
+
+  // Prefer the account's own Brand Kit pillars; fall back to SFT's five.
+  const pillarOptions = pillars.length > 0 ? pillars : SFT_DEFAULT_PILLARS;
 
   const [raw, setRaw] = useState("");
   const [defaultPlatform, setDefaultPlatform] = useState("Instagram");
@@ -269,7 +275,7 @@ export default function BulkGenerate() {
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <option value="">Auto-detect</option>
-                {pillars.map((p) => (
+                {pillarOptions.map((p) => (
                   <option key={p} value={p}>
                     {p}
                   </option>
@@ -351,7 +357,7 @@ export default function BulkGenerate() {
                     aria-label={`Pillar for ${item.topic}`}
                   >
                     <option value="">Auto-detect pillar</option>
-                    {pillars.map((p) => (
+                    {pillarOptions.map((p) => (
                       <option key={p} value={p}>
                         {p}
                       </option>
