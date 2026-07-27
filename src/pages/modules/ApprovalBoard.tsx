@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import {
   DndContext,
   PointerSensor,
@@ -8,13 +14,24 @@ import {
   useDroppable,
   type DragEndEvent,
 } from "@dnd-kit/core";
-import { Kanban as KanbanIcon, Loader2, X, Check, CalendarClock, Send, Trash2 } from "lucide-react";
+import {
+  Kanban as KanbanIcon,
+  Loader2,
+  X,
+  Check,
+  CalendarClock,
+  Send,
+  Trash2,
+  TrendingUp,
+  RotateCcw,
+} from "lucide-react";
 import { invokeEdgeFunction, supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/stores/authStore";
 import { useAccountStore } from "@/stores/accountStore";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import TrendMatchModal, { type TrendMatchResult } from "@/components/TrendMatchModal";
 import { cn } from "@/lib/utils";
 
 const LANES = [
@@ -35,11 +52,16 @@ interface Piece {
   body: string;
   status: LaneStatus;
   pillar: string | null;
+  trend_format: string | null;
+  original_concept: string | null;
   scheduled_at: string | null;
   published_at: string | null;
   created_by: string | null;
   created_at: string;
 }
+
+/** Trend matching is offered on drafts and pieces still in review. */
+const TREND_MATCH_LANES: LaneStatus[] = ["draft", "in_review"];
 
 interface Comment {
   id: string;
@@ -66,10 +88,29 @@ function typeBadge(type: string) {
   return TYPE_LABELS[type] ?? type.replace(/_/g, " ");
 }
 
-function BoardCard({ piece, onOpen }: { piece: Piece; onOpen: (p: Piece) => void }) {
+function BoardCard({
+  piece,
+  onOpen,
+  onMatchTrend,
+  onRevert,
+  reverting,
+}: {
+  piece: Piece;
+  onOpen: (p: Piece) => void;
+  onMatchTrend: (p: Piece) => void;
+  onRevert: (p: Piece) => void;
+  reverting: boolean;
+}) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: piece.id,
   });
+
+  // Card-level controls sit inside a draggable, so they stop pointerdown from
+  // starting a drag and stop click from opening the detail modal.
+  const stopCardEvents = {
+    onPointerDown: (e: ReactPointerEvent) => e.stopPropagation(),
+    onClick: (e: ReactMouseEvent) => e.stopPropagation(),
+  };
 
   return (
     <div
@@ -100,11 +141,52 @@ function BoardCard({ piece, onOpen }: { piece: Piece; onOpen: (p: Piece) => void
         )}
       </div>
       <p className="line-clamp-2 text-sm font-medium leading-snug">{piece.title}</p>
-      <p className="mt-1.5 text-[11px] text-muted-foreground">
-        {piece.status === "scheduled" && piece.scheduled_at
-          ? `Scheduled ${new Date(piece.scheduled_at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}`
-          : new Date(piece.created_at).toLocaleDateString()}
-      </p>
+
+      {piece.trend_format && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="inline-flex items-center gap-1 rounded-full bg-accent px-2 py-0.5 text-[10px] font-medium text-accent-foreground">
+            <TrendingUp className="h-3 w-3" />
+            Trend: {piece.trend_format}
+          </span>
+          {piece.original_concept && (
+            <button
+              type="button"
+              {...stopCardEvents}
+              onClick={(e) => {
+                e.stopPropagation();
+                onRevert(piece);
+              }}
+              disabled={reverting}
+              className="text-[10px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:opacity-40"
+            >
+              {reverting ? "Reverting…" : "Revert to original"}
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="mt-1.5 flex items-center justify-between gap-2">
+        <p className="text-[11px] text-muted-foreground">
+          {piece.status === "scheduled" && piece.scheduled_at
+            ? `Scheduled ${new Date(piece.scheduled_at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}`
+            : new Date(piece.created_at).toLocaleDateString()}
+        </p>
+        {TREND_MATCH_LANES.includes(piece.status) && (
+          <button
+            type="button"
+            {...stopCardEvents}
+            onClick={(e) => {
+              e.stopPropagation();
+              onMatchTrend(piece);
+            }}
+            className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/10"
+            aria-label={`Match ${piece.title} to a trending format`}
+          >
+            <TrendingUp className="h-3.5 w-3.5" />
+            Match Trend
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -114,11 +196,17 @@ function Lane({
   label,
   pieces,
   onOpen,
+  onMatchTrend,
+  onRevert,
+  revertingId,
 }: {
   status: LaneStatus;
   label: string;
   pieces: Piece[];
   onOpen: (p: Piece) => void;
+  onMatchTrend: (p: Piece) => void;
+  onRevert: (p: Piece) => void;
+  revertingId: string | null;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
   return (
@@ -139,7 +227,14 @@ function Lane({
         )}
       >
         {pieces.map((p) => (
-          <BoardCard key={p.id} piece={p} onOpen={onOpen} />
+          <BoardCard
+            key={p.id}
+            piece={p}
+            onOpen={onOpen}
+            onMatchTrend={onMatchTrend}
+            onRevert={onRevert}
+            reverting={revertingId === p.id}
+          />
         ))}
       </div>
     </div>
@@ -164,6 +259,8 @@ export default function ApprovalBoard() {
   const [scheduleFor, setScheduleFor] = useState<Piece | null>(null);
   const [scheduleAt, setScheduleAt] = useState("");
   const [ghlResult, setGhlResult] = useState<string | null>(null);
+  const [trendFor, setTrendFor] = useState<Piece | null>(null);
+  const [revertingId, setRevertingId] = useState<string | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
@@ -177,7 +274,7 @@ export default function ApprovalBoard() {
       const { data, error: loadError } = await supabase
         .from("content_pieces")
         .select(
-          "id, type, platform, title, body, status, pillar, scheduled_at, published_at, created_by, created_at"
+          "id, type, platform, title, body, status, pillar, trend_format, original_concept, scheduled_at, published_at, created_by, created_at"
         )
         .eq("account_id", accountId)
         .order("created_at", { ascending: false });
@@ -307,6 +404,41 @@ export default function ApprovalBoard() {
     }
   }
 
+  /** Patch a piece in the board (and the open detail modal) in place. */
+  function patchPiece(id: string, patch: Partial<Piece>) {
+    setPieces((arr) => arr.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+    setSelected((s) => (s && s.id === id ? { ...s, ...patch } : s));
+  }
+
+  function onTrendApplied(pieceId: string, result: TrendMatchResult) {
+    patchPiece(pieceId, {
+      body: result.body,
+      trend_format: result.trend_format,
+      original_concept: result.original_concept,
+    });
+  }
+
+  /** Restores original_concept exactly and clears the trend tagging. */
+  async function revertTrend(piece: Piece) {
+    if (!piece.original_concept) return;
+    setRevertingId(piece.id);
+    const restored = {
+      body: piece.original_concept,
+      trend_format: null,
+      original_concept: null,
+    };
+    const { error: revertError } = await supabase
+      .from("content_pieces")
+      .update(restored)
+      .eq("id", piece.id);
+    setRevertingId(null);
+    if (revertError) {
+      setError(revertError.message);
+      return;
+    }
+    patchPiece(piece.id, restored);
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center">
@@ -374,10 +506,22 @@ export default function ApprovalBoard() {
               label={lane.label}
               pieces={visible.filter((p) => p.status === lane.status)}
               onOpen={(p) => void openPiece(p)}
+              onMatchTrend={(p) => setTrendFor(p)}
+              onRevert={(p) => void revertTrend(p)}
+              revertingId={revertingId}
             />
           ))}
         </div>
       </DndContext>
+
+      {/* ── Trend match modal ── */}
+      {trendFor && (
+        <TrendMatchModal
+          piece={trendFor}
+          onClose={() => setTrendFor(null)}
+          onApplied={(result) => onTrendApplied(trendFor.id, result)}
+        />
+      )}
 
       {/* ── Card detail modal ── */}
       {selected && (
@@ -405,6 +549,12 @@ export default function ApprovalBoard() {
                   {selected.pillar && (
                     <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-medium">
                       {selected.pillar}
+                    </span>
+                  )}
+                  {selected.trend_format && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-accent px-2 py-0.5 text-[10px] font-medium text-accent-foreground">
+                      <TrendingUp className="h-3 w-3" />
+                      Trend: {selected.trend_format}
                     </span>
                   )}
                 </div>
@@ -456,6 +606,34 @@ export default function ApprovalBoard() {
                   <CalendarClock className="h-4 w-4" />
                   Schedule
                 </Button>
+                {TREND_MATCH_LANES.includes(selected.status) && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setTrendFor(selected)}
+                    disabled={modalBusy !== null}
+                  >
+                    <TrendingUp className="h-4 w-4" />
+                    Match Trend
+                  </Button>
+                )}
+                {selected.trend_format && selected.original_concept && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void revertTrend(selected)}
+                    disabled={revertingId === selected.id}
+                  >
+                    {revertingId === selected.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RotateCcw className="h-4 w-4" />
+                    )}
+                    Revert to original
+                  </Button>
+                )}
                 {account?.ghl_connected &&
                   (selected.status === "approved" || selected.status === "scheduled") && (
                     <Button

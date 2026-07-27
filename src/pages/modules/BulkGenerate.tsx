@@ -11,6 +11,8 @@ import {
   Trash2,
   AlertTriangle,
   RefreshCw,
+  TrendingUp,
+  RotateCcw,
 } from "lucide-react";
 import { invokeEdgeFunction, supabase } from "@/lib/supabase";
 import { useAccountStore } from "@/stores/accountStore";
@@ -19,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import TrendMatchModal, { type TrendMatchResult } from "@/components/TrendMatchModal";
 import { cn } from "@/lib/utils";
 
 const PLATFORMS = ["Instagram", "TikTok", "LinkedIn", "Facebook", "X"];
@@ -45,6 +48,10 @@ interface Piece {
   body: string;
   status: string;
   pillar: string | null;
+  // Set only once a trend format has been applied — generate-social does not
+  // return these columns on a freshly generated piece.
+  trend_format?: string | null;
+  original_concept?: string | null;
   created_at: string;
 }
 
@@ -102,6 +109,8 @@ export default function BulkGenerate() {
   const [doneCount, setDoneCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [trendFor, setTrendFor] = useState<QueueItem | null>(null);
+  const [revertingId, setRevertingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (account && brandStatus === "idle") void loadBrandKit(account.id);
@@ -199,6 +208,40 @@ export default function BulkGenerate() {
       approved: true,
       piece: { ...item.piece, status: "in_review" },
     });
+  }
+
+  function onTrendApplied(item: QueueItem, result: TrendMatchResult) {
+    if (!item.piece) return;
+    patchItem(item.id, {
+      piece: {
+        ...item.piece,
+        body: result.body,
+        trend_format: result.trend_format,
+        original_concept: result.original_concept,
+      },
+    });
+  }
+
+  /** Restores original_concept exactly and clears the trend tagging. */
+  async function revertTrend(item: QueueItem) {
+    const piece = item.piece;
+    if (!piece?.original_concept) return;
+    setRevertingId(item.id);
+    const restored = {
+      body: piece.original_concept,
+      trend_format: null,
+      original_concept: null,
+    };
+    const { error: revertError } = await supabase
+      .from("content_pieces")
+      .update(restored)
+      .eq("id", piece.id);
+    setRevertingId(null);
+    if (revertError) {
+      patchItem(item.id, { error: revertError.message });
+      return;
+    }
+    patchItem(item.id, { piece: { ...piece, ...restored } });
   }
 
   async function copyApproved() {
@@ -401,12 +444,18 @@ export default function BulkGenerate() {
                           {item.piece.pillar}
                         </span>
                       )}
+                      {item.piece.trend_format && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-accent px-2 py-0.5 text-[11px] font-medium text-accent-foreground">
+                          <TrendingUp className="h-3 w-3" />
+                          Trend: {item.piece.trend_format}
+                        </span>
+                      )}
                     </div>
                     <p className="text-sm font-medium">{item.piece.title}</p>
                     <pre className="mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed">
                       {item.piece.body}
                     </pre>
-                    <div className="mt-2">
+                    <div className="mt-2 flex flex-wrap gap-2">
                       <Button
                         type="button"
                         size="sm"
@@ -423,6 +472,32 @@ export default function BulkGenerate() {
                         )}
                         {item.approved ? "On the board" : "Approve → board"}
                       </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setTrendFor(item)}
+                        disabled={running}
+                      >
+                        <TrendingUp className="h-4 w-4" />
+                        Match Trend
+                      </Button>
+                      {item.piece.trend_format && item.piece.original_concept && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => void revertTrend(item)}
+                          disabled={revertingId === item.id}
+                        >
+                          {revertingId === item.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <RotateCcw className="h-4 w-4" />
+                          )}
+                          Revert to original
+                        </Button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -459,6 +534,22 @@ export default function BulkGenerate() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Trend match modal ── */}
+      {trendFor?.piece && (
+        <TrendMatchModal
+          piece={{
+            id: trendFor.piece.id,
+            title: trendFor.piece.title,
+            body: trendFor.piece.body,
+            type: trendFor.piece.type,
+            platform: trendFor.piece.platform,
+            pillar: trendFor.piece.pillar,
+          }}
+          onClose={() => setTrendFor(null)}
+          onApplied={(result) => onTrendApplied(trendFor, result)}
+        />
       )}
 
       {items.some((it) => it.approved) && (
