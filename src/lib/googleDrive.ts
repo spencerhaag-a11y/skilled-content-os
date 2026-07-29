@@ -8,16 +8,27 @@
  * OAuth app is in Testing mode a stored refresh token would expire every 7 days
  * anyway — see README/.env.example.)
  *
- * Both keys below are browser-side by design. The Picker's developer key is as
- * public as the client ID; it is protected with an HTTP-referrer restriction in
- * Google Cloud Console, not by being secret.
+ * All three values below are browser-side by design. The Picker's developer key
+ * is as public as the client ID; it is protected with an HTTP-referrer
+ * restriction in Google Cloud Console, not by being secret. The app ID is just
+ * the Cloud project number.
  */
 
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 const API_KEY = import.meta.env.VITE_GOOGLE_API_KEY as string | undefined;
+/** Cloud project number. Required by the Picker under the drive.file scope. */
+const APP_ID = import.meta.env.VITE_GOOGLE_APP_ID as string | undefined;
 
-/** Read-only access to the user's Drive. Matches the configured OAuth scope. */
-const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+/**
+ * Per-file access, granted only for what the user actually picks — rather than
+ * drive.readonly, which reads their entire Drive.
+ *
+ * This scope only works in combination with PickerBuilder.setAppId(): the grant
+ * is attached to the app identified there when the user selects a file. Without
+ * a matching app ID the picker still returns file metadata, but the subsequent
+ * alt=media download 404s because the app was never granted the file.
+ */
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 
 const GIS_SRC = "https://accounts.google.com/gsi/client";
 const GAPI_SRC = "https://apis.google.com/js/api.js";
@@ -38,6 +49,11 @@ export function driveConfigError(): string | null {
   }
   if (!API_KEY) {
     return "VITE_GOOGLE_API_KEY is not set. The Google Picker needs its developer key in the browser — a key in Supabase secrets is server-side only and can't be read here.";
+  }
+  if (!APP_ID) {
+    // Checked up front because the failure is otherwise silent and confusing:
+    // picking succeeds and only the download fails, with a bare 404.
+    return "VITE_GOOGLE_APP_ID is not set. The drive.file scope needs your Cloud project number here, or Google never grants access to the files a user picks.";
   }
   return null;
 }
@@ -181,6 +197,8 @@ export async function openDrivePicker(accessToken: string): Promise<DriveFile[]>
       const built = new picker.PickerBuilder()
         .setOAuthToken(accessToken)
         .setDeveloperKey(API_KEY!)
+        // Attaches the drive.file grant to this app when the user picks.
+        .setAppId(APP_ID!)
         .setTitle("Select photos and videos")
         .enableFeature(picker.Feature.MULTISELECT_ENABLED)
         .addView(view)
@@ -246,6 +264,13 @@ export async function downloadDriveFile(
     if (res.status === 401 || res.status === 403) {
       throw new Error(
         `Google refused the download of "${file.name}" (${res.status}). The session may have expired — try connecting again.`
+      );
+    }
+    if (res.status === 404) {
+      // Under drive.file the file is invisible to us unless the pick granted
+      // it, so a 404 here means "not granted" far more often than "missing".
+      throw new Error(
+        `Google did not grant access to "${file.name}". Try picking it again — if it keeps failing, VITE_GOOGLE_APP_ID may not match the Cloud project behind VITE_GOOGLE_CLIENT_ID.`
       );
     }
     throw new Error(`Could not download "${file.name}" from Drive (${res.status}).`);
