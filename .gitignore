@@ -6,3 +6,9 @@ dist
 *.log
 .DS_Store
 .supabase
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# Spec documents dropped at the repo root
+/*.docx
