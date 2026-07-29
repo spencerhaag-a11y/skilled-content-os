@@ -69,7 +69,7 @@ export function fileExt(name: string): string {
   return name.split(".").pop()?.toLowerCase() ?? "";
 }
 
-function sanitizeFileName(name: string): string {
+export function sanitizeFileName(name: string): string {
   const ext = fileExt(name);
   const base = name.replace(/\.[^.]+$/, "");
   const clean = base

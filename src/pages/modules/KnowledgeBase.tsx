@@ -20,6 +20,7 @@ import {
 } from "@/stores/knowledgeBaseStore";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import DrivePickerButton from "@/components/DrivePickerButton";
 import { cn } from "@/lib/utils";
 
 /** Six named logo slots — one file each (SCO_KB_Upgrade_Spec). */
@@ -74,6 +75,18 @@ function ExtractionBadge({ status }: { status: KbFile["extraction_status"] }) {
   );
 }
 
+/**
+ * Sections that offer Drive photo import. Most sections technically accept
+ * png/jpg via their default accepted_types, but an "Import photos from Drive"
+ * button under Pricing or FAQs is noise.
+ *
+ * Brand Assets is deliberately absent: its files are filed under a
+ * category_key and the picker doesn't choose one, so imports would land
+ * invisible to that card's per-category lists. DrivePickerButton already
+ * accepts a categoryKey — add a per-category button there when wanted.
+ */
+const DRIVE_PHOTO_SECTIONS = ["brand-photos"];
+
 function SectionCard({ section }: { section: KbSection }) {
   const user = useAuthStore((s) => s.user);
   const account = useAccountStore((s) => s.account);
@@ -81,6 +94,7 @@ function SectionCard({ section }: { section: KbSection }) {
   const upload = useKnowledgeBaseStore((s) => s.upload);
   const remove = useKnowledgeBaseStore((s) => s.remove);
   const signedUrl = useKnowledgeBaseStore((s) => s.signedUrl);
+  const reloadKb = useKnowledgeBaseStore((s) => s.load);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -88,6 +102,7 @@ function SectionCard({ section }: { section: KbSection }) {
 
   const files = filesBySection[section.id] ?? [];
   const accept = section.accepted_types.map((t) => `.${t}`).join(",");
+  const showDriveImport = DRIVE_PHOTO_SECTIONS.includes(section.section_type);
 
   async function handleFiles(list: FileList | null) {
     if (!list || !account || !user) return;
@@ -156,6 +171,17 @@ function SectionCard({ section }: { section: KbSection }) {
         </div>
       </CardHeader>
       <CardContent className="pt-0">
+        {showDriveImport && (
+          <div className="mb-3">
+            <DrivePickerButton
+              imageSectionId={section.id}
+              label="Import photos from Drive"
+              onImported={() => {
+                if (account) void reloadKb(account.id);
+              }}
+            />
+          </div>
+        )}
         {files.length === 0 ? (
           <p className="rounded-md border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
             Nothing here yet. Accepts {section.accepted_types.join(", ").toUpperCase()}.

@@ -18,6 +18,7 @@ import { useAccountStore } from "@/stores/accountStore";
 import { useHandoffStore } from "@/stores/handoffStore";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import DrivePickerButton from "@/components/DrivePickerButton";
 import { cn } from "@/lib/utils";
 
 const MAX_BYTES = 2 * 1024 * 1024 * 1024; // 2GB (Section 5)
@@ -231,6 +232,31 @@ export default function VideoModule() {
               e.target.value = "";
             }}
           />
+          <div className="mt-4 flex flex-col items-center gap-2 border-t pt-4">
+            <p className="text-xs text-muted-foreground">or bring footage in from Google Drive</p>
+            <DrivePickerButton
+              allowVideos
+              label="Import video from Drive"
+              disabled={uploading}
+              onImported={async ({ videos }) => {
+                // Imported videos join the normal pipeline: transcription is
+                // kicked off here, same as a direct upload.
+                for (const job of videos) {
+                  try {
+                    await invokeEdgeFunction("video-transcribe", { video_job_id: job.id });
+                  } catch (err) {
+                    setError(
+                      err instanceof Error
+                        ? `Imported, but transcription failed to start: ${err.message}`
+                        : "Imported, but transcription failed to start."
+                    );
+                  }
+                }
+                await loadJobs();
+                if (videos[0]) setSelectedId(videos[0].id);
+              }}
+            />
+          </div>
           {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
         </CardContent>
       </Card>
