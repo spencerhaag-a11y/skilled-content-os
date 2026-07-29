@@ -27,8 +27,18 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+// Mirrors EXT_ALIASES in knowledgeBaseStore.ts. A section listing "jpg" means
+// the JPEG format, and Drive hands back .jpeg far more often than .jpg, so
+// without this every photo import fails the accepted_types gate below.
+const EXT_ALIASES: Record<string, string> = { jpeg: "jpg" };
+
 function fileExt(name: string): string {
   return name.split(".").pop()?.toLowerCase() ?? "";
+}
+
+function normalizeExt(name: string): string {
+  const ext = fileExt(name);
+  return EXT_ALIASES[ext] ?? ext;
 }
 
 Deno.serve(async (req) => {
@@ -135,7 +145,7 @@ Deno.serve(async (req) => {
 
     // Same gate the direct upload applies, so a Drive import can't slip a type
     // past a section's rules.
-    const ext = fileExt(fileName);
+    const ext = normalizeExt(fileName);
     const accepted: string[] = section.accepted_types ?? [];
     if (accepted.length > 0 && !accepted.includes(ext)) {
       return json(
@@ -151,7 +161,7 @@ Deno.serve(async (req) => {
         section_id: sectionId,
         file_url: path,
         file_name: fileName,
-        file_type: fileExt(fileName),
+        file_type: ext,
         file_size: fileSize,
         // Images carry no extractable text — same rule the direct upload uses.
         extraction_status: "not_applicable",

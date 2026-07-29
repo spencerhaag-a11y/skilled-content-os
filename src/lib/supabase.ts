@@ -22,12 +22,34 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
  * All external API calls (Claude, GHL, AssemblyAI) go through Edge Functions —
  * keys never reach the browser (Section 3, Security Requirements).
  */
+/**
+ * supabase-js collapses every non-2xx into the same "non-2xx status code"
+ * message and leaves the actual response on error.context, so a function's own
+ * error text never reaches the caller. This digs it back out — without it a
+ * validation failure is indistinguishable from an outage in the UI.
+ */
+async function edgeFunctionErrorDetail(error: unknown): Promise<string | null> {
+  const context = (error as { context?: unknown })?.context;
+  if (!(context instanceof Response)) return null;
+  try {
+    const body = await context.clone().json();
+    const message = (body as { error?: unknown; message?: unknown })?.error ??
+      (body as { message?: unknown })?.message;
+    return typeof message === "string" && message.trim() ? message : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function invokeEdgeFunction<TResponse>(
   name: string,
   body: Record<string, unknown>
 ): Promise<TResponse> {
   const { data, error } = await supabase.functions.invoke<TResponse>(name, { body });
-  if (error) throw new Error(`${name} failed: ${error.message}`);
+  if (error) {
+    const detail = await edgeFunctionErrorDetail(error);
+    throw new Error(`${name} failed: ${detail ?? error.message}`);
+  }
   if (data === null) throw new Error(`${name} returned no data`);
   return data;
 }

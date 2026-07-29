@@ -65,8 +65,37 @@ interface KnowledgeBaseState {
   signedUrl: (file: KbFile) => Promise<string | null>;
 }
 
+/**
+ * Extensions with more than one spelling, folded onto the one sections list.
+ * "jpg" in accepted_types means the JPEG format, so a .jpeg file has to
+ * satisfy it — that is the extension phones and Google Drive hand back most
+ * of the time, and rejecting it reads as an arbitrary failure.
+ *
+ * Deliberately not an alias for anything that isn't the same format: .heic is
+ * a different codec browsers can't render, so it stays rejected.
+ */
+const EXT_ALIASES: Record<string, string> = { jpeg: "jpg" };
+
 export function fileExt(name: string): string {
   return name.split(".").pop()?.toLowerCase() ?? "";
+}
+
+/** fileExt, with alias spellings folded onto the canonical extension. */
+export function normalizeExt(name: string): string {
+  const ext = fileExt(name);
+  return EXT_ALIASES[ext] ?? ext;
+}
+
+/**
+ * The `accept` attribute for a file input, including alias spellings so the
+ * OS file dialog doesn't hide files the section would actually take.
+ */
+export function acceptAttr(acceptedTypes: string[]): string {
+  const exts = new Set(acceptedTypes);
+  for (const [alias, canonical] of Object.entries(EXT_ALIASES)) {
+    if (exts.has(canonical)) exts.add(alias);
+  }
+  return [...exts].map((t) => `.${t}`).join(",");
 }
 
 export function sanitizeFileName(name: string): string {
@@ -81,7 +110,7 @@ export function sanitizeFileName(name: string): string {
 }
 
 export function validateFile(file: File, acceptedTypes: string[]): string | null {
-  const ext = fileExt(file.name);
+  const ext = normalizeExt(file.name);
   if (!acceptedTypes.includes(ext)) {
     return `This section accepts: ${acceptedTypes.join(", ").toUpperCase()}.`;
   }
@@ -145,7 +174,7 @@ export const useKnowledgeBaseStore = create<KnowledgeBaseState>((set, get) => ({
         .upload(path, file, { contentType: file.type || undefined, upsert: false });
       if (uploadError) return uploadError.message;
 
-      const ext = fileExt(file.name);
+      const ext = normalizeExt(file.name);
       const extractable = EXTRACTABLE.has(ext);
 
       const { data: row, error: insertError } = await supabase

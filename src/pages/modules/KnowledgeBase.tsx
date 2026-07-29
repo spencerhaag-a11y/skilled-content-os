@@ -14,6 +14,7 @@ import {
 import { useAuthStore } from "@/stores/authStore";
 import { useAccountStore } from "@/stores/accountStore";
 import {
+  acceptAttr,
   useKnowledgeBaseStore,
   type KbFile,
   type KbSection,
@@ -101,7 +102,7 @@ function SectionCard({ section }: { section: KbSection }) {
   const [sectionError, setSectionError] = useState<string | null>(null);
 
   const files = filesBySection[section.id] ?? [];
-  const accept = section.accepted_types.map((t) => `.${t}`).join(",");
+  const accept = acceptAttr(section.accepted_types);
   const showDriveImport = DRIVE_PHOTO_SECTIONS.includes(section.section_type);
 
   async function handleFiles(list: FileList | null) {
