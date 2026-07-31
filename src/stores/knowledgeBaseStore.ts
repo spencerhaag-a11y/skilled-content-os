@@ -33,6 +33,7 @@ const TYPE_TO_MIME: Record<string, string[]> = {
   png: ["image/png"],
   jpg: ["image/jpeg"],
   svg: ["image/svg+xml"],
+  webp: ["image/webp"],
   mp4: ["video/mp4", "video/quicktime"],
   txt: ["text/plain"],
 };
