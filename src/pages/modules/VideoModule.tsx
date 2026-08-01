@@ -13,6 +13,7 @@ import {
   Clock,
 } from "lucide-react";
 import { invokeEdgeFunction, supabase } from "@/lib/supabase";
+import { uploadToStorage } from "@/lib/storageUpload";
 import { useAuthStore } from "@/stores/authStore";
 import { useAccountStore } from "@/stores/accountStore";
 import { useHandoffStore } from "@/stores/handoffStore";
@@ -141,10 +142,15 @@ export default function VideoModule() {
     setUploadPct(0);
     try {
       const path = `${account.id}/video/${Date.now()}_${sanitize(file.name)}`;
-      const { error: uploadError } = await supabase.storage
-        .from("video-uploads")
-        .upload(path, file, { contentType: file.type || "video/mp4", upsert: false });
-      if (uploadError) throw new Error(uploadError.message);
+      // Chunked above 6MB, so a 4K clip survives a dropped connection and
+      // reports real progress instead of jumping 0 → 100.
+      await uploadToStorage({
+        bucket: "video-uploads",
+        path,
+        data: file,
+        contentType: file.type || "video/mp4",
+        onProgress: (fraction) => setUploadPct(Math.round(fraction * 100)),
+      });
       setUploadPct(100);
 
       const { data: job, error: insertError } = await supabase

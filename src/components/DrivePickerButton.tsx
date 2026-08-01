@@ -4,6 +4,8 @@ import { invokeEdgeFunction, supabase } from "@/lib/supabase";
 import { useAccountStore } from "@/stores/accountStore";
 import { useAuthStore } from "@/stores/authStore";
 import { sanitizeFileName } from "@/stores/knowledgeBaseStore";
+import { convertHeicToJpeg, isHeic } from "@/lib/heic";
+import { uploadToStorage } from "@/lib/storageUpload";
 import {
   downloadDriveFile,
   driveConfigError,
@@ -17,12 +19,24 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-type ItemState = "pending" | "downloading" | "uploading" | "recording" | "done" | "error";
+/** Matches the video-uploads bucket's file_size_limit and VideoModule's guard. */
+const MAX_VIDEO_BYTES = 2 * 1024 * 1024 * 1024;
+
+type ItemState =
+  | "pending"
+  | "downloading"
+  | "converting"
+  | "uploading"
+  | "recording"
+  | "done"
+  | "error";
 
 interface ImportItem {
   file: DriveFile;
   state: ItemState;
   error: string | null;
+  /** Upload progress 0–1. Only advances on the resumable path. */
+  progress: number;
 }
 
 export interface DriveImportResult {
@@ -82,33 +96,71 @@ export default function DrivePickerButton({
     setItems((arr) => arr.map((it) => (it.file.id === id ? { ...it, ...patchItem } : it)));
   }
 
+  /**
+   * Routes on the MIME type Drive reports, so any image/* or video/* subtype
+   * is covered — .mov arrives as video/quicktime and .heic as image/heic
+   * without either being named here.
+   *
+   * The one extension fallback is HEIC: Drive intermittently reports it as
+   * application/octet-stream, and silently dropping an iPhone photo is worse
+   * than trusting the extension in that single case.
+   */
+  function mediaKind(file: DriveFile): "image" | "video" | null {
+    if (isGoogleNativeFile(file.mimeType)) return null;
+    if (isImage(file.mimeType) || isHeic(file.name, file.mimeType)) return "image";
+    if (isVideo(file.mimeType)) return "video";
+    return null;
+  }
+
   /** Why a picked file can't be imported here, or null if it can. */
   function rejectionReason(file: DriveFile): string | null {
     if (isGoogleNativeFile(file.mimeType)) return "Google documents can't be imported.";
-    if (isImage(file.mimeType)) {
-      return imageSectionId ? null : "Photos can't be imported here.";
-    }
-    if (isVideo(file.mimeType)) {
-      return allowVideos ? null : "Videos can't be imported here.";
+    const kind = mediaKind(file);
+    if (kind === "image") return imageSectionId ? null : "Photos can't be imported here.";
+    if (kind === "video") {
+      if (!allowVideos) return "Videos can't be imported here.";
+      // Checked here rather than letting storage reject it: the bucket's limit
+      // surfaces mid-upload as an opaque failure, after the whole download.
+      if (file.sizeBytes > MAX_VIDEO_BYTES) return "Video is over the 2GB limit.";
+      return null;
     }
     return "Only photos and videos can be imported.";
   }
 
   async function importOne(token: string, file: DriveFile, accountId: string) {
-    const image = isImage(file.mimeType);
+    const image = mediaKind(file) === "image";
     const bucket = image ? "knowledge-base" : "video-uploads";
     const folder = image ? "knowledge-base" : "video";
-    const safeName = sanitizeFileName(file.name);
-    const path = `${accountId}/${folder}/${Date.now()}_${safeName}`;
 
     patch(file.id, { state: "downloading" });
-    const blob = await downloadDriveFile(token, file);
+    const downloaded = await downloadDriveFile(token, file);
 
-    patch(file.id, { state: "uploading" });
-    const { error: uploadError } = await supabase.storage
-      .from(bucket)
-      .upload(path, blob, { contentType: file.mimeType || undefined, upsert: false });
-    if (uploadError) throw new Error(uploadError.message);
+    // HEIC is transcoded before it reaches storage: nothing but Safari can
+    // render it, so storing the original would upload cleanly and then show a
+    // broken image everywhere. Everything else passes through untouched.
+    let blob: Blob = downloaded;
+    let fileName = file.name;
+    let mimeType = file.mimeType;
+    if (image && isHeic(file.name, file.mimeType)) {
+      patch(file.id, { state: "converting" });
+      const converted = await convertHeicToJpeg(downloaded, file.name, file.mimeType);
+      blob = converted.blob;
+      fileName = converted.fileName;
+      mimeType = converted.mimeType;
+    }
+
+    // Built from the post-conversion name so the stored object, the row, and
+    // the section's accepted_types all agree on the extension.
+    const path = `${accountId}/${folder}/${Date.now()}_${sanitizeFileName(fileName)}`;
+
+    patch(file.id, { state: "uploading", progress: 0 });
+    await uploadToStorage({
+      bucket,
+      path,
+      data: blob,
+      contentType: mimeType,
+      onProgress: (fraction) => patch(file.id, { progress: fraction }),
+    });
 
     patch(file.id, { state: "recording" });
     try {
@@ -117,8 +169,8 @@ export default function DrivePickerButton({
         {
           bucket,
           path,
-          file_name: file.name,
-          mime_type: file.mimeType,
+          file_name: fileName,
+          mime_type: mimeType,
           file_size: blob.size,
           drive_file_id: file.id,
           section_id: image ? imageSectionId : undefined,
@@ -149,7 +201,7 @@ export default function DrivePickerButton({
       if (picked.length === 0) return;
 
       setPhase("importing");
-      setItems(picked.map((file) => ({ file, state: "pending", error: null })));
+      setItems(picked.map((file) => ({ file, state: "pending", error: null, progress: 0 })));
 
       const images: unknown[] = [];
       const videos: { id: string }[] = [];
@@ -243,11 +295,16 @@ export default function DrivePickerButton({
                 {it.state === "done" && <Check className="h-3.5 w-3.5" />}
                 {it.state === "error" && <AlertTriangle className="h-3.5 w-3.5" />}
                 {(it.state === "downloading" ||
+                  it.state === "converting" ||
                   it.state === "uploading" ||
                   it.state === "recording") && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                 {it.state === "pending" && "Queued"}
                 {it.state === "downloading" && "Downloading"}
-                {it.state === "uploading" && "Uploading"}
+                {it.state === "converting" && "Converting HEIC"}
+                {it.state === "uploading" &&
+                  (it.progress > 0 && it.progress < 1
+                    ? `Uploading ${Math.round(it.progress * 100)}%`
+                    : "Uploading")}
                 {it.state === "recording" && "Saving"}
                 {it.state === "done" && "Imported"}
                 {it.state === "error" && (it.error ?? "Failed")}
