@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { Users, UserPlus, ArrowLeft, Loader2, AlertTriangle, Check } from "lucide-react";
+import {
+  Users, UserPlus, ArrowLeft, Loader2, AlertTriangle, Check, KeyRound,
+} from "lucide-react";
 import { invokeEdgeFunction, supabase } from "@/lib/supabase";
 import { PermissionGrid } from "@/components/PermissionGrid";
 import {
@@ -31,6 +33,10 @@ export default function TeamMembers() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [view, setView] = useState<View>({ mode: "list" });
+  // Set by an invite or a reset. While present it replaces the body — the
+  // password is shown exactly once and is not recoverable afterwards.
+  const [credentials, setCredentials] = useState<InviteResult | null>(null);
+  const [resettingId, setResettingId] = useState<string | null>(null);
 
   const loadMembers = useCallback(async () => {
     setLoading(true);
@@ -44,6 +50,27 @@ export default function TeamMembers() {
   useEffect(() => {
     void loadMembers();
   }, [loadMembers]);
+
+  async function resetPassword(m: TeamMemberRow) {
+    const label = m.full_name?.trim() || m.email;
+    if (!window.confirm(
+      `Reset the password for ${label}?\n\nTheir current password stops working immediately, and they'll be asked to choose a new one next time they sign in.`
+    )) return;
+
+    setError(null);
+    setNotice(null);
+    setResettingId(m.id);
+    try {
+      const res = await invokeEdgeFunction<InviteResult>("team-reset-password", {
+        profile_id: m.id,
+      });
+      setCredentials(res);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not reset that password.");
+    } finally {
+      setResettingId(null);
+    }
+  }
 
   function backToList(message?: string) {
     setView({ mode: "list" });
@@ -63,13 +90,13 @@ export default function TeamMembers() {
             Invite team members and control which modules each one can open.
           </p>
         </div>
-        {view.mode === "list" && (
+        {view.mode === "list" && !credentials && (
           <Button onClick={() => { setNotice(null); setView({ mode: "add" }); }}>
             <UserPlus className="mr-2 h-4 w-4" />
             Add team member
           </Button>
         )}
-        {view.mode !== "list" && (
+        {view.mode !== "list" && !credentials && (
           <Button variant="outline" onClick={() => backToList()}>
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back
@@ -90,15 +117,30 @@ export default function TeamMembers() {
         </div>
       )}
 
-      {view.mode === "list" && (
+      {credentials && (
+        <Credentials
+          result={credentials}
+          heading={`New password for ${credentials.email}`}
+          blurb="Their previous password stopped working. They'll be asked to choose a new one the next time they sign in."
+          onDone={() => {
+            setCredentials(null);
+            setNotice(`Password reset for ${credentials.email}.`);
+            void loadMembers();
+          }}
+        />
+      )}
+
+      {!credentials && view.mode === "list" && (
         <MemberList
           members={members}
           loading={loading}
+          resettingId={resettingId}
+          onReset={(m) => void resetPassword(m)}
           onSelect={(m) => { setNotice(null); setView({ mode: "edit", member: m }); }}
         />
       )}
-      {view.mode === "add" && <AddMember onDone={backToList} />}
-      {view.mode === "edit" && (
+      {!credentials && view.mode === "add" && <AddMember onDone={backToList} />}
+      {!credentials && view.mode === "edit" && (
         <EditMember member={view.member} onDone={backToList} />
       )}
     </div>
@@ -108,10 +150,14 @@ export default function TeamMembers() {
 function MemberList({
   members,
   loading,
+  resettingId,
+  onReset,
   onSelect,
 }: {
   members: TeamMemberRow[];
   loading: boolean;
+  resettingId: string | null;
+  onReset: (m: TeamMemberRow) => void;
   onSelect: (m: TeamMemberRow) => void;
 }) {
   if (loading) {
@@ -142,10 +188,15 @@ function MemberList({
       <CardContent className="p-0">
         <ul className="divide-y">
           {members.map((m) => (
-            <li key={m.id}>
+            <li
+              key={m.id}
+              className="flex items-center gap-2 pr-3 transition-colors hover:bg-muted/50"
+            >
+              {/* Separate controls, not nested: a button inside a button is
+                  invalid and swallows the inner click. */}
               <button
                 onClick={() => onSelect(m)}
-                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/50"
+                className="flex min-w-0 flex-1 items-center justify-between gap-3 px-4 py-3 text-left"
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">
@@ -163,6 +214,20 @@ function MemberList({
                   {m.last_sign_in_at ? "Active" : "Invited"}
                 </span>
               </button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                disabled={resettingId !== null}
+                onClick={() => onReset(m)}
+              >
+                {resettingId === m.id ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <KeyRound className="h-4 w-4" />
+                )}
+                Reset password
+              </Button>
             </li>
           ))}
         </ul>
@@ -406,9 +471,13 @@ function EditMember({
 function Credentials({
   result,
   onDone,
+  heading,
+  blurb,
 }: {
   result: InviteResult;
   onDone: () => void;
+  heading?: string;
+  blurb?: string;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -432,10 +501,10 @@ function Credentials({
       <Card>
         <CardContent className="space-y-4 pt-6">
           <div>
-            <p className="font-medium">{result.email} can now sign in</p>
+            <p className="font-medium">{heading ?? `${result.email} can now sign in`}</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              They'll be asked to choose their own password the first time they
-              sign in, and this temporary one stops working at that point.
+              {blurb ??
+                "They'll be asked to choose their own password the first time they sign in, and this temporary one stops working at that point."}
             </p>
           </div>
 
