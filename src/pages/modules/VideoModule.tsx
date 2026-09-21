@@ -22,7 +22,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import DrivePickerButton from "@/components/DrivePickerButton";
 import { cn } from "@/lib/utils";
 
-const MAX_BYTES = 2 * 1024 * 1024 * 1024; // 2GB (Section 5)
+const MAX_BYTES = 5 * 1024 * 1024 * 1024; // 5GB (matches video-uploads bucket)
 const ACCEPT = ["video/mp4", "video/quicktime"];
 const POLL_MS = 5000;
 
@@ -133,7 +133,7 @@ export default function VideoModule() {
       return;
     }
     if (file.size > MAX_BYTES) {
-      setError("File exceeds the 2GB limit.");
+      setError("File exceeds the 5GB limit.");
       return;
     }
     if (!account || !user) return;
@@ -223,7 +223,7 @@ export default function VideoModule() {
               <>
                 <UploadCloud className="h-7 w-7 text-muted-foreground" />
                 <p className="text-sm font-medium">Click to upload MP4 or MOV</p>
-                <p className="text-xs text-muted-foreground">Up to 2GB · 4K supported</p>
+                <p className="text-xs text-muted-foreground">Up to 5GB · 4K supported</p>
               </>
             )}
           </button>

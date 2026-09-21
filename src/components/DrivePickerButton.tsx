@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /** Matches the video-uploads bucket's file_size_limit and VideoModule's guard. */
-const MAX_VIDEO_BYTES = 2 * 1024 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 5 * 1024 * 1024 * 1024;
 
 type ItemState =
   | "pending"
@@ -121,7 +121,7 @@ export default function DrivePickerButton({
       if (!allowVideos) return "Videos can't be imported here.";
       // Checked here rather than letting storage reject it: the bucket's limit
       // surfaces mid-upload as an opaque failure, after the whole download.
-      if (file.sizeBytes > MAX_VIDEO_BYTES) return "Video is over the 2GB limit.";
+      if (file.sizeBytes > MAX_VIDEO_BYTES) return "Video is over the 5GB limit.";
       return null;
     }
     return "Only photos and videos can be imported.";
