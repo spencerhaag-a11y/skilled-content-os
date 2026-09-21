@@ -36,6 +36,7 @@ const NicheResearch = lazy(() => import("@/pages/modules/NicheResearch"));
 const BrandKit = lazy(() => import("@/pages/modules/BrandKit"));
 const KnowledgeBase = lazy(() => import("@/pages/modules/KnowledgeBase"));
 const TeamMembers = lazy(() => import("@/pages/modules/TeamMembers"));
+const ForcePasswordChange = lazy(() => import("@/pages/auth/ForcePasswordChange"));
 const AccountSettings = lazy(() => import("@/pages/modules/AccountSettings"));
 
 function FullScreenSpinner() {
@@ -77,6 +78,20 @@ function RequireOwner({ children }: { children: ReactNode }) {
     return <FullScreenSpinner />;
   }
   if (!claimIsOwner && !profileIsOwner) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
+/**
+ * Holds an invited team member on the password screen until they've replaced
+ * the temporary password they were mailed. Wraps the whole shell rather than
+ * sitting on a route, so there is no module — and no sidebar — reachable
+ * first. Owners are never flagged, so this is a single boolean read for them.
+ */
+function RequirePasswordSet({ children }: { children: ReactNode }) {
+  const status = useAccountStore((s) => s.status);
+  const mustChange = useAccountStore((s) => s.profile?.must_change_password ?? false);
+  if (status === "idle" || status === "loading") return <FullScreenSpinner />;
+  if (mustChange) return <ForcePasswordChange />;
   return <>{children}</>;
 }
 
@@ -146,7 +161,9 @@ export default function App() {
         <Route
           element={
             <RequireAuth>
-              <AppLayout />
+              <RequirePasswordSet>
+                <AppLayout />
+              </RequirePasswordSet>
             </RequireAuth>
           }
         >

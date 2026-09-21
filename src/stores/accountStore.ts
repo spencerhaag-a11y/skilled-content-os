@@ -28,6 +28,8 @@ export interface Profile {
   owner_account_id: string | null;
   /** 'owner' or 'team_member' (Team Members spec, Section 1). */
   member_role: "owner" | "team_member";
+  /** Invited members land with a generated password and must replace it. */
+  must_change_password: boolean;
 }
 
 type LoadStatus = "idle" | "loading" | "ready" | "error";
@@ -51,7 +53,7 @@ async function fetchProfile(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase
     .from("profiles")
     .select(
-      "id, account_id, email, full_name, is_platform_owner, owner_account_id, member_role"
+      "id, account_id, email, full_name, is_platform_owner, owner_account_id, member_role, must_change_password"
     )
     .eq("id", userId)
     .maybeSingle();

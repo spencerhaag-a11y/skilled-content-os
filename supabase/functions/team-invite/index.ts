@@ -1,13 +1,20 @@
 // Edge Function: team-invite
-// Invites a team member to the caller's account and seeds their permissions.
+// Creates a team member on the caller's account with a server-generated
+// temporary password, mails them their credentials, and seeds permissions.
 //
-// The invitee sets their own password via the emailed invite link — no
-// password is ever created here (Spec Section 3).
+// createUser rather than inviteUserByEmail: the member signs in at the normal
+// login page with a password, and profiles.must_change_password (set by
+// handle_new_user) forces them to replace it before the app opens.
+//
+// email_confirm is set so the account is usable immediately — there is no
+// confirmation link in this flow to click.
 //
 // Deploy: supabase functions deploy team-invite
 
 import { corsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
 import { adminClient, PERMISSION_KEYS, requireOwner } from "../_shared/teamAuth.ts";
+import { generatePassword } from "../_shared/password.ts";
+import { inviteEmailBody, sendEmail } from "../_shared/email.ts";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -39,38 +46,32 @@ Deno.serve(async (req) => {
   }
 
   const admin = adminClient();
-
-  // Where the invite link lands. The SITE_URL secret wins when set (staging,
-  // preview builds); the literal keeps production links correct without
-  // depending on a secret existing, which is what produced localhost links.
-  //
-  // Supabase only honours redirectTo when it matches the project's Redirect
-  // URLs allow-list. If it doesn't, the link silently falls back to the Auth
-  // Site URL — so this value must also be allow-listed in the dashboard.
   const appUrl = Deno.env.get("SITE_URL") ?? "https://app.skilledft.com";
+  const tempPassword = generatePassword(16);
 
-  // The metadata here is what handle_new_user branches on to file the new
-  // profile under this owner's account instead of minting a fresh one.
-  const { data: invited, error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
-    data: {
+  // The metadata is what handle_new_user branches on to file the profile under
+  // this owner's account and set must_change_password.
+  const { data: created, error: createError } = await admin.auth.admin.createUser({
+    email,
+    password: tempPassword,
+    email_confirm: true,
+    user_metadata: {
       member_role: "team_member",
       owner_account_id: ctx.accountId,
       full_name: firstName,
     },
-    redirectTo: appUrl,
   });
 
-  if (inviteError || !invited?.user) {
+  if (createError || !created?.user) {
+    const message = createError?.message ?? "Could not create that team member.";
     return json(
-      { error: inviteError?.message ?? "Could not send the invite." },
-      inviteError?.message?.toLowerCase().includes("already") ? 409 : 400
+      { error: message },
+      /already|exist|registered/i.test(message) ? 409 : 400
     );
   }
 
-  const profileId = invited.user.id;
+  const profileId = created.user.id;
 
-  // One row per known key so an unlisted key in the request can't create a
-  // permission the app doesn't recognise, and every key has an explicit value.
   const rows = PERMISSION_KEYS.map((key) => ({
     profile_id: profileId,
     account_id: ctx.accountId,
@@ -84,10 +85,23 @@ Deno.serve(async (req) => {
 
   if (permError) {
     return json(
-      { error: `Invite sent, but permissions failed to save: ${permError.message}` },
+      { error: `Account created, but permissions failed to save: ${permError.message}` },
       500
     );
   }
 
-  return json({ profile_id: profileId, email, status: "invited" });
+  const mail = inviteEmailBody({ appUrl, firstName, email, password: tempPassword });
+  const delivery = await sendEmail({ to: email, ...mail });
+
+  // The password is returned either way. When mail is configured this is
+  // belt-and-braces; when it isn't, it is the only delivery path the owner
+  // has, so the UI shows it once and tells them to pass it on directly.
+  return json({
+    profile_id: profileId,
+    email,
+    temp_password: tempPassword,
+    email_sent: delivery.sent,
+    email_error: delivery.reason ?? null,
+    login_url: appUrl,
+  });
 });

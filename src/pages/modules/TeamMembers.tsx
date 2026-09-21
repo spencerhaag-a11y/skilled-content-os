@@ -171,29 +171,51 @@ function MemberList({
   );
 }
 
+interface InviteResult {
+  profile_id: string;
+  email: string;
+  temp_password: string;
+  email_sent: boolean;
+  email_error: string | null;
+  login_url: string;
+}
+
 function AddMember({ onDone }: { onDone: (message: string) => void }) {
   const [firstName, setFirstName] = useState("");
   const [email, setEmail] = useState("");
   const [permissions, setPermissions] = useState(emptyPermissionMap());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [created, setCreated] = useState<InviteResult | null>(null);
 
   async function send() {
     setError(null);
     if (!email.trim()) return setError("Enter an email address.");
     setSaving(true);
     try {
-      await invokeEdgeFunction("team-invite", {
+      const res = await invokeEdgeFunction<InviteResult>("team-invite", {
         email: email.trim(),
         first_name: firstName.trim(),
         permissions,
       });
-      onDone(`Invite sent to ${email.trim()}.`);
+      // Shown rather than passed to onDone: when no email provider is
+      // configured this panel is the only place the password exists, and it
+      // is not recoverable once the page moves on.
+      setCreated(res);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not send the invite.");
+      setError(err instanceof Error ? err.message : "Could not create that team member.");
     } finally {
       setSaving(false);
     }
+  }
+
+  if (created) {
+    return (
+      <Credentials
+        result={created}
+        onDone={() => onDone(`${created.email} was added to your team.`)}
+      />
+    );
   }
 
   return (
@@ -369,6 +391,93 @@ function EditMember({
           {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           Save changes
         </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One-time display of a new member's generated password.
+ *
+ * It is shown whether or not the email went out: when no provider is
+ * configured the email silently cannot send, and this is the only copy of the
+ * password that will ever exist — it is not stored anywhere in readable form.
+ */
+function Credentials({
+  result,
+  onDone,
+}: {
+  result: InviteResult;
+  onDone: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  async function copyAll() {
+    const text = [
+      `Sign in: ${result.login_url}`,
+      `Username: ${result.email}`,
+      `Temporary password: ${result.temp_password}`,
+    ].join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardContent className="space-y-4 pt-6">
+          <div>
+            <p className="font-medium">{result.email} can now sign in</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              They'll be asked to choose their own password the first time they
+              sign in, and this temporary one stops working at that point.
+            </p>
+          </div>
+
+          <dl className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm">
+            <div className="flex gap-3">
+              <dt className="w-32 shrink-0 text-muted-foreground">Sign in</dt>
+              <dd className="min-w-0 break-all">{result.login_url}</dd>
+            </div>
+            <div className="flex gap-3">
+              <dt className="w-32 shrink-0 text-muted-foreground">Username</dt>
+              <dd className="min-w-0 break-all">{result.email}</dd>
+            </div>
+            <div className="flex gap-3">
+              <dt className="w-32 shrink-0 text-muted-foreground">Temporary password</dt>
+              <dd className="min-w-0 break-all font-mono">{result.temp_password}</dd>
+            </div>
+          </dl>
+
+          {result.email_sent ? (
+            <p className="flex items-center gap-2 text-sm text-emerald-600">
+              <Check className="h-4 w-4 shrink-0" />
+              These details were emailed to {result.email}.
+            </p>
+          ) : (
+            <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+              <span>
+                No email was sent, so pass these on yourself. Copy them now —
+                this password is not recoverable once you leave this screen.
+                {result.email_error ? ` (${result.email_error})` : null}
+              </span>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="flex justify-end gap-2">
+        <Button variant="outline" onClick={copyAll}>
+          {copied ? <Check className="mr-2 h-4 w-4" /> : null}
+          {copied ? "Copied" : "Copy details"}
+        </Button>
+        <Button onClick={onDone}>Done</Button>
       </div>
     </div>
   );
