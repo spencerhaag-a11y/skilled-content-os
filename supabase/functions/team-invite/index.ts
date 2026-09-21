@@ -40,16 +40,24 @@ Deno.serve(async (req) => {
 
   const admin = adminClient();
 
+  // Where the invite link lands. The SITE_URL secret wins when set (staging,
+  // preview builds); the literal keeps production links correct without
+  // depending on a secret existing, which is what produced localhost links.
+  //
+  // Supabase only honours redirectTo when it matches the project's Redirect
+  // URLs allow-list. If it doesn't, the link silently falls back to the Auth
+  // Site URL — so this value must also be allow-listed in the dashboard.
+  const appUrl = Deno.env.get("SITE_URL") ?? "https://app.skilledft.com";
+
   // The metadata here is what handle_new_user branches on to file the new
   // profile under this owner's account instead of minting a fresh one.
-  const siteUrl = Deno.env.get("SITE_URL");
   const { data: invited, error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
     data: {
       member_role: "team_member",
       owner_account_id: ctx.accountId,
       full_name: firstName,
     },
-    ...(siteUrl ? { redirectTo: siteUrl } : {}),
+    redirectTo: appUrl,
   });
 
   if (inviteError || !invited?.user) {
