@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { TagInput } from "@/components/TagInput";
+import { useCan } from "@/stores/teamPermissionsStore";
 
 const PLATFORM_OPTIONS = ["Instagram", "TikTok", "LinkedIn", "Facebook", "X"];
 
@@ -43,6 +44,7 @@ interface ScanSuggestions {
 }
 
 export default function BrandKit() {
+  const canEdit = useCan("brand_kit_edit");
   const user = useAuthStore((s) => s.user);
   const account = useAccountStore((s) => s.account);
   const { kit: storedKit, status, error, load, save } = useBrandKitStore();
@@ -128,6 +130,10 @@ export default function BrandKit() {
    *  only writes when something actually changed and every color is a valid
    *  hex; the Save button forces a write. */
   async function commit(force = false) {
+    // The single write path: both the submit button and the form's onBlur
+    // autosave land here, so a read-only team member is stopped once,
+    // rather than per-control.
+    if (!canEdit) return;
     if (!account || !user) return;
     if (!force && !dirtyRef.current) return;
     if (form.brand_colors.some((c) => !HEX_RE.test(c))) {
@@ -239,7 +245,7 @@ export default function BrandKit() {
                   type="button"
                   variant="outline"
                   onClick={handleScan}
-                  disabled={scanState === "scanning"}
+                  disabled={scanState === "scanning" || !canEdit}
                   className="shrink-0"
                 >
                   {scanState === "scanning" ? (
@@ -570,10 +576,12 @@ export default function BrandKit() {
               ) : saveStatus === "error" ? (
                 <span className="text-destructive">Couldn't save — try the Save button.</span>
               ) : (
-                "Changes save automatically when you click out of a field."
+                canEdit
+                  ? "Changes save automatically when you click out of a field."
+                  : "You have read-only access to the Brand Kit."
               )}
             </p>
-            <Button type="submit" disabled={saveStatus === "saving"}>
+            <Button type="submit" disabled={saveStatus === "saving" || !canEdit}>
               {saveStatus === "saving" ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : saveStatus === "saved" ? (

@@ -33,6 +33,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import TrendMatchModal, { type TrendMatchResult } from "@/components/TrendMatchModal";
 import { cn } from "@/lib/utils";
+import { useCan } from "@/stores/teamPermissionsStore";
 
 const LANES = [
   { status: "draft", label: "Draft" },
@@ -101,6 +102,7 @@ function BoardCard({
   onRevert: (p: Piece) => void;
   reverting: boolean;
 }) {
+  const canTrend = useCan("trending_format_matching");
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: piece.id,
   });
@@ -171,7 +173,7 @@ function BoardCard({
             ? `Scheduled ${new Date(piece.scheduled_at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}`
             : new Date(piece.created_at).toLocaleDateString()}
         </p>
-        {TREND_MATCH_LANES.includes(piece.status) && (
+        {canTrend && TREND_MATCH_LANES.includes(piece.status) && (
           <button
             type="button"
             {...stopCardEvents}
@@ -242,6 +244,7 @@ function Lane({
 }
 
 export default function ApprovalBoard() {
+  const canTrend = useCan("trending_format_matching");
   const user = useAuthStore((s) => s.user);
   const account = useAccountStore((s) => s.account);
   const profile = useAccountStore((s) => s.profile);
@@ -606,7 +609,7 @@ export default function ApprovalBoard() {
                   <CalendarClock className="h-4 w-4" />
                   Schedule
                 </Button>
-                {TREND_MATCH_LANES.includes(selected.status) && (
+                {canTrend && TREND_MATCH_LANES.includes(selected.status) && (
                   <Button
                     type="button"
                     variant="outline"

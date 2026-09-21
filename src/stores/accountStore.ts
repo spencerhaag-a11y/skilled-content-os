@@ -24,6 +24,10 @@ export interface Profile {
   email: string;
   full_name: string | null;
   is_platform_owner: boolean;
+  /** Account this profile belongs to as a team member; null for owners. */
+  owner_account_id: string | null;
+  /** 'owner' or 'team_member' (Team Members spec, Section 1). */
+  member_role: "owner" | "team_member";
 }
 
 type LoadStatus = "idle" | "loading" | "ready" | "error";
@@ -46,7 +50,9 @@ interface AccountState {
 async function fetchProfile(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, account_id, email, full_name, is_platform_owner")
+    .select(
+      "id, account_id, email, full_name, is_platform_owner, owner_account_id, member_role"
+    )
     .eq("id", userId)
     .maybeSingle();
   if (error) throw new Error(error.message);

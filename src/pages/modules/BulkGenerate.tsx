@@ -23,6 +23,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import TrendMatchModal, { type TrendMatchResult } from "@/components/TrendMatchModal";
 import { cn } from "@/lib/utils";
+import { useCan } from "@/stores/teamPermissionsStore";
 
 const PLATFORMS = ["Instagram", "TikTok", "LinkedIn", "Facebook", "X"];
 
@@ -91,6 +92,7 @@ function newId(): string {
 }
 
 export default function BulkGenerate() {
+  const canTrend = useCan("trending_format_matching");
   const account = useAccountStore((s) => s.account);
   const pillars = useBrandKitStore((s) => s.kit.pillars);
   const brandStatus = useBrandKitStore((s) => s.status);
@@ -477,7 +479,7 @@ export default function BulkGenerate() {
                         size="sm"
                         variant="outline"
                         onClick={() => setTrendFor(item)}
-                        disabled={running}
+                        disabled={running || !canTrend}
                       >
                         <TrendingUp className="h-4 w-4" />
                         Match Trend

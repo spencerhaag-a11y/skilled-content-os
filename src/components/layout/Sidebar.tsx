@@ -3,6 +3,7 @@ import { X, ShieldCheck } from "lucide-react";
 import { MODULES, MODULE_GROUPS } from "@/lib/modules";
 import { useAccountStore } from "@/stores/accountStore";
 import { useAuthStore } from "@/stores/authStore";
+import { useTeamPermissionsStore } from "@/stores/teamPermissionsStore";
 import { cn } from "@/lib/utils";
 
 interface SidebarProps {
@@ -17,12 +18,22 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
   const claimIsOwner = useAuthStore((s) => s.isPlatformOwner);
   const profileIsOwner = useAccountStore((s) => s.profile?.is_platform_owner ?? false);
   const isPlatformOwner = claimIsOwner || profileIsOwner;
+  // memberRole and permissions are subscribed to explicitly: canAccess is a
+  // stable function reference, so selecting it alone would never re-render
+  // this component when a team member's grants finish loading.
+  useTeamPermissionsStore((s) => s.memberRole);
+  useTeamPermissionsStore((s) => s.permissions);
+  const canAccess = useTeamPermissionsStore((s) => s.canAccess);
 
   // Owner-disabled modules (Module 21 feature flags) drop out of navigation.
   // Dashboard and Settings are core and never hidden, even if flagged.
   const ALWAYS_ON = new Set(["/", "/settings"]);
   const visibleModules = MODULES.filter(
-    (m) => ALWAYS_ON.has(m.path) || !disabledModules.includes(m.path)
+    (m) =>
+      (ALWAYS_ON.has(m.path) || !disabledModules.includes(m.path)) &&
+      // A team member never sees a link to a module they cannot open, so
+      // there are no dead links in the sidebar (Spec Section 5).
+      canAccess(m.access)
   );
 
   return (

@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import DrivePickerButton from "@/components/DrivePickerButton";
 import { cn } from "@/lib/utils";
+import { useCan } from "@/stores/teamPermissionsStore";
 
 /** Six named logo slots — one file each (SCO_KB_Upgrade_Spec). */
 const LOGO_SLOTS: { slot_key: string; label: string; accept: string[] }[] = [
@@ -89,6 +90,7 @@ function ExtractionBadge({ status }: { status: KbFile["extraction_status"] }) {
 const DRIVE_PHOTO_SECTIONS = ["brand-photos"];
 
 function SectionCard({ section }: { section: KbSection }) {
+  const canEdit = useCan("knowledge_base_edit");
   const user = useAuthStore((s) => s.user);
   const account = useAccountStore((s) => s.account);
   const filesBySection = useKnowledgeBaseStore((s) => s.filesBySection);
@@ -155,7 +157,7 @@ function SectionCard({ section }: { section: KbSection }) {
             variant="outline"
             size="sm"
             className="shrink-0"
-            disabled={uploading}
+            disabled={uploading || !canEdit}
             onClick={() => inputRef.current?.click()}
           >
             {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
@@ -172,7 +174,7 @@ function SectionCard({ section }: { section: KbSection }) {
         </div>
       </CardHeader>
       <CardContent className="pt-0">
-        {showDriveImport && (
+        {showDriveImport && canEdit && (
           <div className="mb-3">
             <DrivePickerButton
               imageSectionId={section.id}
@@ -212,6 +214,7 @@ function SectionCard({ section }: { section: KbSection }) {
                 </button>
                 <button
                   type="button"
+                  disabled={!canEdit}
                   onClick={() => void handleDelete(file)}
                   className="rounded p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                   aria-label={`Delete ${file.file_name}`}
@@ -231,6 +234,7 @@ function SectionCard({ section }: { section: KbSection }) {
 /** One uploaded file with open + delete actions. Reads the store directly so
  *  store mutations (upload/remove elsewhere) re-render it automatically. */
 function FileRow({ file, onError }: { file: KbFile; onError: (m: string) => void }) {
+  const canEdit = useCan("knowledge_base_edit");
   const signedUrl = useKnowledgeBaseStore((s) => s.signedUrl);
   const remove = useKnowledgeBaseStore((s) => s.remove);
   const [busy, setBusy] = useState(false);
@@ -268,7 +272,7 @@ function FileRow({ file, onError }: { file: KbFile; onError: (m: string) => void
       <button
         type="button"
         onClick={() => void del()}
-        disabled={busy}
+        disabled={busy || !canEdit}
         className="rounded p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
         aria-label={`Delete ${file.file_name}`}
       >
@@ -280,6 +284,7 @@ function FileRow({ file, onError }: { file: KbFile; onError: (m: string) => void
 
 /** Logo Kit — six named single-file slots (replaces the generic upload). */
 function LogoKitCard({ section }: { section: KbSection }) {
+  const canEdit = useCan("knowledge_base_edit");
   const user = useAuthStore((s) => s.user);
   const account = useAccountStore((s) => s.account);
   const files = useKnowledgeBaseStore((s) => s.filesBySection[section.id] ?? []);
@@ -350,7 +355,7 @@ function LogoKitCard({ section }: { section: KbSection }) {
                   variant={file ? "ghost" : "outline"}
                   size="sm"
                   className="shrink-0"
-                  disabled={busySlot === slot.slot_key}
+                  disabled={busySlot === slot.slot_key || !canEdit}
                   onClick={() => trigger(slot)}
                 >
                   {busySlot === slot.slot_key ? (
@@ -383,6 +388,7 @@ function LogoKitCard({ section }: { section: KbSection }) {
 
 /** Brand Assets — five sub-categories, many files each. */
 function BrandAssetsCard({ section }: { section: KbSection }) {
+  const canEdit = useCan("knowledge_base_edit");
   const user = useAuthStore((s) => s.user);
   const account = useAccountStore((s) => s.account);
   const files = useKnowledgeBaseStore((s) => s.filesBySection[section.id] ?? []);
@@ -450,7 +456,7 @@ function BrandAssetsCard({ section }: { section: KbSection }) {
                   variant="outline"
                   size="sm"
                   className="shrink-0"
-                  disabled={busyCategory === category.category_key}
+                  disabled={busyCategory === category.category_key || !canEdit}
                   onClick={() => trigger(category)}
                 >
                   {busyCategory === category.category_key ? (

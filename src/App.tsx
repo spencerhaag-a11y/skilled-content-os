@@ -2,7 +2,10 @@ import { lazy, Suspense, useEffect, type ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { useAuthStore } from "@/stores/authStore";
 import { useAccountStore } from "@/stores/accountStore";
+import { useTeamPermissionsStore } from "@/stores/teamPermissionsStore";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { RequirePermission } from "@/components/RequirePermission";
+import { MODULES } from "@/lib/modules";
 
 import Login from "@/pages/auth/Login";
 import Signup from "@/pages/auth/Signup";
@@ -32,6 +35,7 @@ const SocialListener = lazy(() => import("@/pages/modules/SocialListener"));
 const NicheResearch = lazy(() => import("@/pages/modules/NicheResearch"));
 const BrandKit = lazy(() => import("@/pages/modules/BrandKit"));
 const KnowledgeBase = lazy(() => import("@/pages/modules/KnowledgeBase"));
+const TeamMembers = lazy(() => import("@/pages/modules/TeamMembers"));
 const AccountSettings = lazy(() => import("@/pages/modules/AccountSettings"));
 
 function FullScreenSpinner() {
@@ -40,6 +44,16 @@ function FullScreenSpinner() {
       <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
     </div>
   );
+}
+
+/**
+ * Wraps a module route in its access rule from the registry. An unknown path
+ * falls back to owner-only rather than open — a route added without an entry
+ * in MODULES should fail closed.
+ */
+function guard(path: string, element: ReactNode) {
+  const access = MODULES.find((m) => m.path === path)?.access ?? "owner";
+  return <RequirePermission access={access}>{element}</RequirePermission>;
 }
 
 /** Gates the app shell behind a valid Supabase session. */
@@ -80,6 +94,9 @@ export default function App() {
   const user = useAuthStore((s) => s.user);
   const loadForUser = useAccountStore((s) => s.loadForUser);
   const clearAccount = useAccountStore((s) => s.clear);
+  const profile = useAccountStore((s) => s.profile);
+  const loadPermissions = useTeamPermissionsStore((s) => s.loadForProfile);
+  const clearPermissions = useTeamPermissionsStore((s) => s.clear);
 
   useEffect(() => {
     void initialize();
@@ -92,8 +109,15 @@ export default function App() {
       void loadForUser(user.id);
     } else {
       clearAccount();
+      clearPermissions();
     }
-  }, [user, loadForUser, clearAccount]);
+  }, [user, loadForUser, clearAccount, clearPermissions]);
+
+  // Permissions follow the profile: owners resolve without a round trip,
+  // team members fetch their grant rows once per session.
+  useEffect(() => {
+    if (profile) void loadPermissions(profile);
+  }, [profile, loadPermissions]);
 
   return (
     <BrowserRouter>
@@ -126,28 +150,29 @@ export default function App() {
             </RequireAuth>
           }
         >
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/analytics" element={<Analytics />} />
-          <Route path="/repurpose" element={<RepurposingEngine />} />
-          <Route path="/bulk-generate" element={<BulkGenerate />} />
-          <Route path="/social-posts" element={<SocialPosts />} />
-          <Route path="/blog-posts" element={<BlogPosts />} />
-          <Route path="/email" element={<EmailMarketing />} />
-          <Route path="/testimonials" element={<Testimonials />} />
-          <Route path="/video" element={<VideoModule />} />
-          <Route path="/brainstorm" element={<BrainstormChat />} />
-          <Route path="/kanban" element={<ApprovalBoard />} />
-          <Route path="/calendar" element={<ContentCalendar />} />
-          <Route path="/library" element={<ContentLibrary />} />
-          <Route path="/prompts" element={<PromptLibrary />} />
-          <Route path="/seo" element={<SeoTools />} />
-          <Route path="/google-business" element={<GoogleBusiness />} />
-          <Route path="/website-scanner" element={<WebsiteScanner />} />
-          <Route path="/social-listener" element={<SocialListener />} />
-          <Route path="/niche-research" element={<NicheResearch />} />
-          <Route path="/brand-kit" element={<BrandKit />} />
-          <Route path="/knowledge-base" element={<KnowledgeBase />} />
-          <Route path="/settings" element={<AccountSettings />} />
+          <Route path="/" element={guard("/", <Dashboard />)} />
+          <Route path="/analytics" element={guard("/analytics", <Analytics />)} />
+          <Route path="/repurpose" element={guard("/repurpose", <RepurposingEngine />)} />
+          <Route path="/bulk-generate" element={guard("/bulk-generate", <BulkGenerate />)} />
+          <Route path="/social-posts" element={guard("/social-posts", <SocialPosts />)} />
+          <Route path="/blog-posts" element={guard("/blog-posts", <BlogPosts />)} />
+          <Route path="/email" element={guard("/email", <EmailMarketing />)} />
+          <Route path="/testimonials" element={guard("/testimonials", <Testimonials />)} />
+          <Route path="/video" element={guard("/video", <VideoModule />)} />
+          <Route path="/brainstorm" element={guard("/brainstorm", <BrainstormChat />)} />
+          <Route path="/kanban" element={guard("/kanban", <ApprovalBoard />)} />
+          <Route path="/calendar" element={guard("/calendar", <ContentCalendar />)} />
+          <Route path="/library" element={guard("/library", <ContentLibrary />)} />
+          <Route path="/prompts" element={guard("/prompts", <PromptLibrary />)} />
+          <Route path="/seo" element={guard("/seo", <SeoTools />)} />
+          <Route path="/google-business" element={guard("/google-business", <GoogleBusiness />)} />
+          <Route path="/website-scanner" element={guard("/website-scanner", <WebsiteScanner />)} />
+          <Route path="/social-listener" element={guard("/social-listener", <SocialListener />)} />
+          <Route path="/niche-research" element={guard("/niche-research", <NicheResearch />)} />
+          <Route path="/brand-kit" element={guard("/brand-kit", <BrandKit />)} />
+          <Route path="/knowledge-base" element={guard("/knowledge-base", <KnowledgeBase />)} />
+          <Route path="/team" element={guard("/team", <TeamMembers />)} />
+          <Route path="/settings" element={guard("/settings", <AccountSettings />)} />
           <Route
             path="/owner/*"
             element={
