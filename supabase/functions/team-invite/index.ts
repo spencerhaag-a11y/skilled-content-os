@@ -93,6 +93,18 @@ Deno.serve(async (req) => {
   const mail = inviteEmailBody({ appUrl, firstName, email, password: tempPassword });
   const delivery = await sendEmail({ to: email, ...mail });
 
+  // Logged so "did the invite actually email?" is answerable from the function
+  // logs rather than only from the response body the browser threw away.
+  // The password is deliberately never logged.
+  console.log(JSON.stringify({
+    event: "team_invite",
+    profile_id: profileId,
+    to: email,
+    email_sent: delivery.sent,
+    email_provider: delivery.sent ? "resend" : null,
+    email_reason: delivery.reason ?? null,
+  }));
+
   // The password is returned either way. When mail is configured this is
   // belt-and-braces; when it isn't, it is the only delivery path the owner
   // has, so the UI shows it once and tells them to pass it on directly.
